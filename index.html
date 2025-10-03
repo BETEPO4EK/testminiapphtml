@@ -43,6 +43,18 @@
         <span id="cartCount">0</span>
     </div>
 
+    <!-- Плашка активного заказа -->
+    <div id="activeOrderBanner" style="display: none;" class="mb-4 bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg">
+        <div class="flex justify-between items-start">
+            <div class="flex-1">
+                <h3 class="font-bold text-blue-900">📦 Активный заказ #<span id="orderNumber"></span></h3>
+                <p class="text-sm text-blue-700 mt-1">Статус: <span id="orderStatus" class="font-medium"></span></p>
+                <p class="text-sm text-blue-600 mt-1">Сумма: <span id="orderTotal"></span>₽</p>
+            </div>
+            <button onclick="closeOrderBanner()" class="text-blue-500 text-xl">×</button>
+        </div>
+    </div>
+
     <!-- Главный экран - товары -->
     <div id="productsScreen">
         <h1 class="text-2xl font-bold mb-4">🛍️ Магазин</h1>
@@ -99,22 +111,73 @@
         let tg = window.Telegram.WebApp;
         let cart = [];
         let products = [];
+        let activeOrder = null;
 
         // Инициализация
         tg.ready();
         tg.expand();
 
-        // Загрузка товаров
+        // Загрузка товаров и активного заказа
         async function loadProducts() {
             try {
                 const response = await fetch(`${API_URL}/products`);
                 const data = await response.json();
                 products = data.data;
                 renderProducts();
+                
+                // Загружаем активный заказ пользователя
+                await loadActiveOrder();
             } catch (error) {
                 console.error('Ошибка загрузки товаров:', error);
                 document.getElementById('productsList').innerHTML = '<p class="col-span-2 text-center text-red-500">Ошибка загрузки товаров</p>';
             }
+        }
+
+        // Загрузка активного заказа
+        async function loadActiveOrder() {
+            try {
+                const userId = tg.initDataUnsafe.user?.id || 464350533;
+                const response = await fetch(`${API_URL}/orders/${userId}`);
+                const data = await response.json();
+                
+                if (data.success && data.data.length > 0) {
+                    // Берём последний заказ который не completed и не cancelled
+                    activeOrder = data.data.find(o => o.status !== 'completed' && o.status !== 'cancelled');
+                    
+                    if (activeOrder) {
+                        showActiveOrderBanner(activeOrder);
+                    }
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки заказов:', error);
+            }
+        }
+
+        // Показать плашку активного заказа
+        function showActiveOrderBanner(order) {
+            const banner = document.getElementById('activeOrderBanner');
+            document.getElementById('orderNumber').textContent = order.id;
+            document.getElementById('orderStatus').textContent = getStatusText(order.status);
+            document.getElementById('orderTotal').textContent = order.totalPrice;
+            banner.style.display = 'block';
+        }
+
+        // Закрыть плашку
+        function closeOrderBanner() {
+            document.getElementById('activeOrderBanner').style.display = 'none';
+        }
+
+        // Текст статуса
+        function getStatusText(status) {
+            const statuses = {
+                'pending': '⏳ Ожидает оплаты',
+                'paid': '✅ Оплачен',
+                'confirmed': '📦 Готовится к отправке',
+                'shipped': '🚚 Передан в доставку',
+                'completed': '✅ Получен',
+                'cancelled': '❌ Отменён'
+            };
+            return statuses[status] || status;
         }
 
         // Отрисовка товаров
@@ -267,10 +330,18 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    tg.showAlert('✅ Заказ оформлен! Ожидайте сообщение от продавца.');
+                    tg.showAlert('✅ Заказ оформлен! Вам придёт сообщение с реквизитами для оплаты.');
                     cart = [];
                     updateCartBadge();
-                    tg.close();
+                    
+                    // Показываем плашку нового заказа
+                    activeOrder = result.data.order;
+                    showActiveOrderBanner(activeOrder);
+                    
+                    // Возвращаемся к товарам
+                    setTimeout(() => {
+                        showProducts();
+                    }, 1500);
                 } else {
                     tg.showAlert('❌ Ошибка: ' + result.error);
                 }
